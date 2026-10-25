@@ -39,6 +39,8 @@ jobs:
 
   ios:
     needs: version
+    # "[skip ios]" in a commit message builds only Android (quicker while working on it).
+    if: ${{ !contains(github.event.head_commit.message, '[skip ios]') }}
     runs-on: macos-26
     steps:
       - uses: actions/checkout@v5
@@ -67,7 +69,8 @@ jobs:
           java-version: "17"
       - name: Android SDK and NDK
         run: |
-          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install \
+          # `yes` is cut off once sdkmanager stops reading; that's not a failure.
+          { yes || true; } | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install \
             "platforms;android-36" "build-tools;36.1.0" "ndk;${NDK_VERSION}" > /dev/null
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/${NDK_VERSION}" >> "$GITHUB_ENV"
       - name: Swift toolchain
