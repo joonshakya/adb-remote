@@ -93,7 +93,7 @@ jobs:
           swift sdk install "$base/swift-${SWIFT_VERSION}-RELEASE_android.artifactbundle.tar.gz" \
             --checksum a356b79f8f1daa6ae3a66f4c556966ca20c0208b3659805cf30a83a0a31d6772
           bundle=$(find "$HOME" -type d -name "swift-${SWIFT_VERSION}-RELEASE_android.artifactbundle" | head -n 1)
-          sh "$bundle/swift-android/scripts/setup-android-sdk.sh"
+          bash "$bundle/swift-android/scripts/setup-android-sdk.sh"
       - name: Release key
         env:
           KEYSTORE: ${{ secrets.ADBREMOTE_KEYSTORE_BASE64 }}
