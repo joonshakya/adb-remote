@@ -1,0 +1,12 @@
+.DS_Store
+xcuserdata/
+*.xcuserstate
+
+# Build output
+AdbKit/.build/
+AdbKit/.build-android/
+App/build/
+App/build-*/
+AndroidViewer/build/
+AndroidHelper/build/
+dist/
