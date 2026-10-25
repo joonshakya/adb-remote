@@ -6,7 +6,10 @@ set -eu
 cd "$(dirname "$0")"
 CONFIG="${1:-release}"
 SWIFT_VERSION=6.4.1
-SWIFT="$HOME/Library/Developer/Toolchains/swift-$SWIFT_VERSION-RELEASE.xctoolchain/usr/bin/swift"
+# The open-source toolchain (Xcode's Swift can't target Android): on a Mac from swiftly's
+# toolchain folder, elsewhere (CI on Linux) whatever `swift` is on the PATH, or $SWIFT.
+SWIFT="${SWIFT:-$HOME/Library/Developer/Toolchains/swift-$SWIFT_VERSION-RELEASE.xctoolchain/usr/bin/swift}"
+[ -x "$SWIFT" ] || SWIFT=swift
 SDK="${ANDROID_HOME:-$HOME/Library/Android/sdk}"
 export ANDROID_NDK_HOME="${ANDROID_NDK_HOME:-$(ls -d "$SDK"/ndk/30.* | tail -n 1)}"
 BIN=$(ls -d "$ANDROID_NDK_HOME"/toolchains/llvm/prebuilt/*/bin | head -n 1)

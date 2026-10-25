@@ -1,0 +1,130 @@
+# Builds the iOS IPA and the Android APK.
+#   - Every push to main and every pull request: build both (artifacts on the run's page).
+#   - A tag like v1.2 or v1.2.3: build both with that version and publish a GitHub Release.
+#
+# Android releases are signed with the project's key when these repository secrets exist:
+#   ADBREMOTE_KEYSTORE_BASE64   base64 of the .jks file
+#   ADBREMOTE_KEYSTORE_PASSWORD its password
+# Without them the APK is signed with a throwaway debug key (fine for testing, but each
+# build then can't be installed over the previous one).
+name: Build and release
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  SWIFT_VERSION: "6.4.1"
+  NDK_VERSION: "30.0.16248370"
+
+jobs:
+  version:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - id: v
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=0.0.${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+          fi
+
+  ios:
+    needs: version
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Build IPA
+        run: Tools/build-ipa.sh "${{ needs.version.outputs.version }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ios
+          path: dist/AdbRemote-*.ipa
+          if-no-files-found: error
+
+  android:
+    needs: version
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Android SDK and NDK
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install \
+            "platforms;android-36" "build-tools;36.1.0" "ndk;${NDK_VERSION}" > /dev/null
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/${NDK_VERSION}" >> "$GITHUB_ENV"
+      - name: Swift toolchain
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libcurl4-openssl-dev libxml2-dev libncurses-dev libedit2 libsqlite3-0 \
+            libpython3-dev libz3-dev pkg-config zlib1g-dev > /dev/null
+          curl -fsSL -O "https://download.swift.org/swiftly/linux/swiftly-$(uname -m).tar.gz"
+          tar zxf "swiftly-$(uname -m).tar.gz"
+          ./swiftly init --quiet-shell-followup --assume-yes --skip-install
+          . "${SWIFTLY_HOME_DIR:-$HOME/.local/share/swiftly}/env.sh"
+          swiftly install "$SWIFT_VERSION" --use --assume-yes
+          echo "$SWIFTLY_BIN_DIR" >> "$GITHUB_PATH"
+          echo "SWIFTLY_HOME_DIR=$SWIFTLY_HOME_DIR" >> "$GITHUB_ENV"
+          echo "SWIFTLY_BIN_DIR=$SWIFTLY_BIN_DIR" >> "$GITHUB_ENV"
+      - name: Swift SDK for Android
+        run: |
+          base="https://download.swift.org/swift-${SWIFT_VERSION}-release/android-sdk/swift-${SWIFT_VERSION}-RELEASE"
+          swift sdk install "$base/swift-${SWIFT_VERSION}-RELEASE_android.artifactbundle.tar.gz" \
+            --checksum a356b79f8f1daa6ae3a66f4c556966ca20c0208b3659805cf30a83a0a31d6772
+          bundle=$(find "$HOME" -type d -name "swift-${SWIFT_VERSION}-RELEASE_android.artifactbundle" | head -n 1)
+          sh "$bundle/swift-android/scripts/setup-android-sdk.sh"
+      - name: Release key
+        env:
+          KEYSTORE: ${{ secrets.ADBREMOTE_KEYSTORE_BASE64 }}
+          PASSWORD: ${{ secrets.ADBREMOTE_KEYSTORE_PASSWORD }}
+        run: |
+          if [ -n "$KEYSTORE" ]; then
+            echo "$KEYSTORE" | base64 -d > "$RUNNER_TEMP/release.jks"
+            echo "ADBREMOTE_KEYSTORE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+            echo "ADBREMOTE_KEYSTORE_PASSWORD=$PASSWORD" >> "$GITHUB_ENV"
+          else
+            echo "::warning::No release key in secrets; the APK is signed with a debug key."
+          fi
+      - name: Build APK
+        run: Tools/build-apk.sh "${{ needs.version.outputs.version }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android
+          path: dist/AdbRemote-android-*.apk
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [version, ios, android]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: ADB Remote ${{ needs.version.outputs.version }}
+          generate_release_notes: true
+          files: |
+            dist/AdbRemote-*.ipa
+            dist/AdbRemote-android-*.apk
+          body: |
+            **Android**: download `AdbRemote-android-${{ needs.version.outputs.version }}.apk` and open it on your phone (allow installing from your browser or file manager). Android 10 or newer.
+
+            **iPhone**: `AdbRemote-${{ needs.version.outputs.version }}.ipa` is unsigned; install it with AltStore, SideStore, LiveContainer or your own signing. iOS 17 or newer.
+
+            The TV app is installed on the TV automatically by either phone app.

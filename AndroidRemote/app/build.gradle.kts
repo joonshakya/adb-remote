@@ -12,17 +12,28 @@ android {
         applicationId = "local.adbremote.android"
         minSdk = 29
         targetSdk = 36
-        versionCode = 4
-        versionName = "0.4"
+        versionCode = 1100
+        versionName = "0.11"
         ndk { abiFilters += listOf("arm64-v8a") }
+    }
+
+    // Release builds are signed with the project's key when it is provided (the release
+    // workflow passes it from repository secrets); local builds fall back to the debug key.
+    val releaseKey = System.getenv("ADBREMOTE_KEYSTORE")?.takeIf { file(it).exists() }
+    signingConfigs {
+        if (releaseKey != null) create("release") {
+            storeFile = file(releaseKey)
+            storePassword = System.getenv("ADBREMOTE_KEYSTORE_PASSWORD")
+            keyAlias = System.getenv("ADBREMOTE_KEY_ALIAS") ?: "adbremote"
+            keyPassword = System.getenv("ADBREMOTE_KEY_PASSWORD") ?: System.getenv("ADBREMOTE_KEYSTORE_PASSWORD")
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            // Sideloaded: sign with the local debug key.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName(if (releaseKey != null) "release" else "debug")
         }
     }
 
