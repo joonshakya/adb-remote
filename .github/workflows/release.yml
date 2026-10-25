@@ -44,6 +44,11 @@ jobs:
     runs-on: macos-26
     steps:
       - uses: actions/checkout@v5
+      - name: Cache Swift packages
+        uses: actions/cache@v4
+        with:
+          path: App/build-device/SourcePackages
+          key: ios-spm-${{ hashFiles('AdbKit/Package.resolved') }}
       - name: Install XcodeGen
         run: brew install xcodegen
       - name: Build IPA
@@ -67,12 +72,39 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
+          cache: gradle
+      # Toolchains are cached between runs; each install step only runs on a cache miss.
+      - name: Cache Android SDK parts
+        id: android-sdk
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ env.ANDROID_HOME }}/ndk/${{ env.NDK_VERSION }}
+            ${{ env.ANDROID_HOME }}/platforms/android-36
+            ${{ env.ANDROID_HOME }}/build-tools/36.1.0
+          key: android-sdk-36-36.1.0-${{ env.NDK_VERSION }}
+      - name: Cache Swift toolchain and Swift SDK for Android
+        id: swift
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.local/share/swiftly
+            ~/.config/swiftpm/swift-sdks
+          key: swift-${{ env.SWIFT_VERSION }}-android-${{ env.NDK_VERSION }}
+      - name: Cache Swift build
+        uses: actions/cache@v4
+        with:
+          path: AndroidRemote/bridge/.build-android
+          key: swift-build-${{ env.SWIFT_VERSION }}-${{ hashFiles('AdbKit/Package.resolved', 'AdbKit/Sources/**', 'AndroidRemote/bridge/Sources/**', 'AndroidRemote/bridge/Package.swift') }}
+          restore-keys: swift-build-${{ env.SWIFT_VERSION }}-
       - name: Android SDK and NDK
+        if: steps.android-sdk.outputs.cache-hit != 'true'
         run: |
           # `yes` is cut off once sdkmanager stops reading; that's not a failure.
           { yes || true; } | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install \
             "platforms;android-36" "build-tools;36.1.0" "ndk;${NDK_VERSION}" > /dev/null
-          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/${NDK_VERSION}" >> "$GITHUB_ENV"
+      - name: Point to the NDK
+        run: echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/${NDK_VERSION}" >> "$GITHUB_ENV"
       - name: Swift toolchain
         run: |
           exec > >(tee "$RUNNER_TEMP/step.log") 2>&1
@@ -80,15 +112,20 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq libcurl4-openssl-dev libxml2-dev libncurses-dev libedit2 libsqlite3-0 \
             libpython3-dev libz3-dev pkg-config zlib1g-dev > /dev/null
-          curl -fsSL -O "https://download.swift.org/swiftly/linux/swiftly-$(uname -m).tar.gz"
-          tar zxf "swiftly-$(uname -m).tar.gz"
-          ./swiftly init --quiet-shell-followup --assume-yes --skip-install
-          . "${SWIFTLY_HOME_DIR:-$HOME/.local/share/swiftly}/env.sh"
-          swiftly install "$SWIFT_VERSION" --use --assume-yes
+          if [ "${{ steps.swift.outputs.cache-hit }}" != "true" ]; then
+            curl -fsSL -O "https://download.swift.org/swiftly/linux/swiftly-$(uname -m).tar.gz"
+            tar zxf "swiftly-$(uname -m).tar.gz"
+            ./swiftly init --quiet-shell-followup --assume-yes --skip-install
+            . "$HOME/.local/share/swiftly/env.sh"
+            swiftly install "$SWIFT_VERSION" --use --assume-yes
+          fi
+          . "$HOME/.local/share/swiftly/env.sh"
+          swift --version
           echo "$SWIFTLY_BIN_DIR" >> "$GITHUB_PATH"
           echo "SWIFTLY_HOME_DIR=$SWIFTLY_HOME_DIR" >> "$GITHUB_ENV"
           echo "SWIFTLY_BIN_DIR=$SWIFTLY_BIN_DIR" >> "$GITHUB_ENV"
       - name: Swift SDK for Android
+        if: steps.swift.outputs.cache-hit != 'true'
         run: |
           exec > >(tee "$RUNNER_TEMP/step.log") 2>&1
           trap 'echo "::error title=Swift SDK for Android::$(tail -n 25 "$RUNNER_TEMP/step.log" | tr "\\n" " " | cut -c1-3000)"' ERR
