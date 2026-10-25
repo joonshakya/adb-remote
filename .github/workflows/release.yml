@@ -40,7 +40,8 @@ jobs:
   ios:
     needs: version
     # "[skip ios]" in a commit message builds only Android (quicker while working on it).
-    if: ${{ !contains(github.event.head_commit.message, '[skip ios]') }}
+    # Release tags always build both.
+    if: ${{ startsWith(github.ref, 'refs/tags/') || !contains(github.event.head_commit.message, '[skip ios]') }}
     runs-on: macos-26
     steps:
       - uses: actions/checkout@v5
