@@ -41,12 +41,12 @@ jobs:
     needs: version
     runs-on: macos-26
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install XcodeGen
         run: brew install xcodegen
       - name: Build IPA
         run: Tools/build-ipa.sh "${{ needs.version.outputs.version }}"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: ios
           path: dist/AdbRemote-*.ipa
@@ -55,9 +55,13 @@ jobs:
   android:
     needs: version
     runs-on: ubuntu-24.04
+    defaults:
+      run:
+        # On failure, the step's last output lines become an error annotation on the run.
+        shell: bash -e -o pipefail {0}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
@@ -68,6 +72,8 @@ jobs:
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/${NDK_VERSION}" >> "$GITHUB_ENV"
       - name: Swift toolchain
         run: |
+          exec > >(tee "$RUNNER_TEMP/step.log") 2>&1
+          trap 'echo "::error title=Swift toolchain::$(tail -n 25 "$RUNNER_TEMP/step.log" | tr "\\n" " " | cut -c1-3000)"' ERR
           sudo apt-get update -qq
           sudo apt-get install -y -qq libcurl4-openssl-dev libxml2-dev libncurses-dev libedit2 libsqlite3-0 \
             libpython3-dev libz3-dev pkg-config zlib1g-dev > /dev/null
@@ -81,6 +87,8 @@ jobs:
           echo "SWIFTLY_BIN_DIR=$SWIFTLY_BIN_DIR" >> "$GITHUB_ENV"
       - name: Swift SDK for Android
         run: |
+          exec > >(tee "$RUNNER_TEMP/step.log") 2>&1
+          trap 'echo "::error title=Swift SDK for Android::$(tail -n 25 "$RUNNER_TEMP/step.log" | tr "\\n" " " | cut -c1-3000)"' ERR
           base="https://download.swift.org/swift-${SWIFT_VERSION}-release/android-sdk/swift-${SWIFT_VERSION}-RELEASE"
           swift sdk install "$base/swift-${SWIFT_VERSION}-RELEASE_android.artifactbundle.tar.gz" \
             --checksum a356b79f8f1daa6ae3a66f4c556966ca20c0208b3659805cf30a83a0a31d6772
@@ -99,8 +107,11 @@ jobs:
             echo "::warning::No release key in secrets; the APK is signed with a debug key."
           fi
       - name: Build APK
-        run: Tools/build-apk.sh "${{ needs.version.outputs.version }}"
-      - uses: actions/upload-artifact@v4
+        run: |
+          exec > >(tee "$RUNNER_TEMP/step.log") 2>&1
+          trap 'echo "::error title=Build APK::$(tail -n 25 "$RUNNER_TEMP/step.log" | tr "\n" " " | cut -c1-3000)"' ERR
+          Tools/build-apk.sh "${{ needs.version.outputs.version }}"
+      - uses: actions/upload-artifact@v5
         with:
           name: android
           path: dist/AdbRemote-android-*.apk
@@ -111,7 +122,7 @@ jobs:
     needs: [version, ios, android]
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v5
         with:
           path: dist
           merge-multiple: true
