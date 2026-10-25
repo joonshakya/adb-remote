@@ -75,15 +75,13 @@ jobs:
           java-version: "17"
           cache: gradle
       # Toolchains are cached between runs; each install step only runs on a cache miss.
-      # (The runner's ANDROID_HOME is /usr/local/lib/android/sdk; `env.` only sees workflow variables.)
+      # The Android parts go in a folder this job owns (the runner's own SDK folder can't be
+      # restored into), and ANDROID_HOME points there.
       - name: Cache Android SDK parts
         id: android-sdk
         uses: actions/cache@v4
         with:
-          path: |
-            /usr/local/lib/android/sdk/ndk/${{ env.NDK_VERSION }}
-            /usr/local/lib/android/sdk/platforms/android-36
-            /usr/local/lib/android/sdk/build-tools/36.1.0
+          path: ~/android-sdk
           key: android-sdk-36-36.1.0-${{ env.NDK_VERSION }}
       - name: Cache Swift toolchain and Swift SDK for Android
         id: swift
@@ -92,7 +90,8 @@ jobs:
           path: |
             ~/.local/share/swiftly
             ~/.config/swiftpm/swift-sdks
-          key: swift-${{ env.SWIFT_VERSION }}-android-${{ env.NDK_VERSION }}
+          # The SDK links to the NDK in ~/android-sdk; a new NDK location needs a new key.
+          key: swift-${{ env.SWIFT_VERSION }}-android-${{ env.NDK_VERSION }}-home-sdk
       - name: Cache Swift build
         uses: actions/cache@v4
         with:
@@ -103,10 +102,13 @@ jobs:
         if: steps.android-sdk.outputs.cache-hit != 'true'
         run: |
           # `yes` is cut off once sdkmanager stops reading; that's not a failure.
-          { yes || true; } | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install \
+          { yes || true; } | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$HOME/android-sdk" --install \
             "platforms;android-36" "build-tools;36.1.0" "ndk;${NDK_VERSION}" > /dev/null
-      - name: Point to the NDK
-        run: echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/${NDK_VERSION}" >> "$GITHUB_ENV"
+      - name: Use that SDK
+        run: |
+          echo "ANDROID_HOME=$HOME/android-sdk" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$HOME/android-sdk" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_HOME=$HOME/android-sdk/ndk/${NDK_VERSION}" >> "$GITHUB_ENV"
       - name: Swift toolchain
         run: |
           exec > >(tee "$RUNNER_TEMP/step.log") 2>&1
